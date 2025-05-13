@@ -226,6 +226,40 @@
             background-color: #e0f2fe; /* sky-100 */
             outline: 2px solid #0ea5e9; /* sky-600 */
         }
+
+        /* 레이블 편집 모달 스타일 */
+        .label-edit-modal {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background-color: white; padding: 2rem; border-radius: 0.75rem;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+            z-index: 100; max-height: 80vh; overflow-y: auto; min-width: 400px; max-width: 90vw;
+        }
+        .label-edit-modal ul { list-style: none; padding: 0; }
+        .label-edit-modal li { 
+            display: grid; grid-template-columns: 1fr 2fr; gap: 1rem; align-items: center;
+            padding: 0.5rem 0; border-bottom: 1px solid #e5e7eb; 
+        }
+        .label-edit-modal li:last-child { border-bottom: none; }
+        .label-edit-modal .original-label-text { font-size: 0.875rem; color: #6b7280; /* gray-500 */ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .label-edit-modal .custom-label-input { 
+            width: 100%; padding: 0.375rem 0.5rem; border: 1px solid #d1d5db; /* gray-300 */
+            border-radius: 0.25rem; font-size: 0.875rem;
+        }
+        .label-edit-modal .custom-label-input:disabled { background-color: #f3f4f6; /* gray-100 */ color: #9ca3af; /* gray-400 */ }
+        .label-edit-modal .modal-actions { margin-top: 1.5rem; text-align: right; }
+        .label-edit-modal .modal-actions button {
+            padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500;
+            margin-left: 0.5rem;
+        }
+        .label-edit-modal .modal-actions .apply-btn { background-color: #2563eb; color: white; }
+        .label-edit-modal .modal-actions .apply-btn:hover { background-color: #1d4ed8; }
+        .label-edit-modal .modal-actions .cancel-btn { background-color: #e5e7eb; color: #374151; }
+        .label-edit-modal .modal-actions .cancel-btn:hover { background-color: #d1d5db; }
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5); z-index: 99;
+        }
+
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
@@ -233,6 +267,7 @@
     <header class="bg-gradient-to-r from-sky-600 to-cyan-500 text-white p-6 shadow-xl">
         <h1 class="text-3xl font-bold text-center tracking-tight">📊 엑셀 문항 분석 및 시각화 도구</h1>
         <p class="text-center text-sm mt-1 opacity-90">엑셀 파일을 업로드하고, 문항별 답변 분포 및 교차 분석 결과를 확인하세요.</p>
+        <div id="buildInfo" class="text-center text-xs mt-2 opacity-75"></div>
     </header>
 
     <main class="container mx-auto mt-10 p-5 space-y-10">
@@ -410,7 +445,7 @@
         let questionTypes = {}; // { qHeader: 'likert' | 'subjective' | 'objective', ... }
 
         let crossAnalysisSectionCounter = 0; 
-        // activeCharts will store objects: { instance: ChartInstance, questionHeader: String, type: 'basic'|'cross'|'matrix', originalCanvas: HTMLCanvasElement, chartData: {}, originalTitle: String, customTitle: String, crossChartType?: String, groupingQuestion?: String, likertQuestions?: Array<String>, labelOrder?: Array<String> }
+        // activeCharts will store objects: { instance: ChartInstance, questionHeader: String, type: 'basic'|'cross'|'matrix', originalCanvas: HTMLCanvasElement, chartData: {}, originalTitle: String, customTitle: String, crossChartType?: String, groupingQuestion?: String, likertQuestions?: Array<String>, customLabels?: object }
         let activeCharts = []; 
         
         const LIKERT_SCALES = {
@@ -666,8 +701,8 @@
 
             if (questionTextRowIndex !== -1 && data.length > questionTextRowIndex) { 
                 const textRowData = data[questionTextRowIndex];
-                excelHeaders.forEach((h, i) => { questionFullTexts[h] = textRowData[i] ? stripHtmlTags(textRowData[i]).trim() : stripHtmlTags(h); });
-            } else { excelHeaders.forEach(h => { questionFullTexts[h] = stripHtmlTags(h); }); }
+                excelHeaders.forEach((h, i) => { questionFullTexts[h] = textRowData[i] ? stripHtmlTags(String(textRowData[i])).trim() : stripHtmlTags(String(h)); });
+            } else { excelHeaders.forEach(h => { questionFullTexts[h] = stripHtmlTags(String(h)); }); }
             
             excelDataForAnalysis = (data.length > dataStartRowIndex) ? data.slice(dataStartRowIndex).map(rA => { const rO = {}; excelHeaders.forEach((h, i) => { rO[h] = rA[i]; }); return rO; }) : [];
 
@@ -991,6 +1026,14 @@
             let totalValidResponses = 0;
             let otherResponsesCounts = 0; 
             const noResponseCounts = {}; 
+
+            // Initialize counts for all defined Likert responses to 0
+            if (likertScale) {
+                likertScale.responses.forEach(respKey => {
+                    counts[respKey] = 0;
+                });
+            }
+
 
             excelDataForAnalysis.forEach(row => {
                 const response = row[questionHeader];
@@ -1354,7 +1397,7 @@
                 chartsGenerated = true;
                 selectedQuestions.forEach((qHeader, index) => {
                     const vizWrapper = document.createElement('div'); vizWrapper.className = 'viz-wrapper';
-                    const chartArrayIndex = activeCharts.length; // 현재 차트의 activeCharts 배열 인덱스
+                    const chartArrayIndex = activeCharts.length; 
                     
                     const originalChartTitle = questionFullTexts[qHeader] || qHeader; 
                     const titleElement = document.createElement('h4'); 
@@ -1411,7 +1454,7 @@
                             currentChartType: chosenChartType,
                             originalTitle: originalChartTitle, 
                             customTitle: originalChartTitle,
-                            labelOrder: [...chartData.labels] 
+                            customLabels: {} 
                         };
                         activeCharts.push(chartInfo);
                         renderIndividualChart(chartArrayIndex, chosenChartType); 
@@ -1436,12 +1479,12 @@
                         });
                         chartActionsContainer.appendChild(individualChartTypeSelect);
 
-                        // Add "범례 순서 변경" button
-                        const reorderButton = document.createElement('button');
-                        reorderButton.textContent = '범례 순서';
-                        reorderButton.className = 'download-button download-csv-button ml-2'; // Reusing some styles
-                        reorderButton.onclick = () => openLabelOrderModal(chartArrayIndex);
-                        chartActionsContainer.appendChild(reorderButton);
+                        // Add "레이블 편집" button
+                        const editLabelsButton = document.createElement('button');
+                        editLabelsButton.textContent = '레이블 편집';
+                        editLabelsButton.className = 'download-button download-csv-button ml-2'; // Reusing some styles
+                        editLabelsButton.onclick = () => openLabelEditModal(chartArrayIndex);
+                        chartActionsContainer.appendChild(editLabelsButton);
                     }
                     vizWrapper.appendChild(chartActionsContainer); 
                     chartsArea.appendChild(vizWrapper); 
@@ -1494,14 +1537,14 @@
                 chartContainer.appendChild(newCanvas);
                 chartInfo.originalCanvas = newCanvas; 
 
-                generateCrossAnalysisChart(config, config.idSuffix, true); 
+                generateCrossAnalysisChart(config, config.idSuffix, true, chartIndex); 
             }
         }
 
         function renderIndividualChart(chartIndex, chartTypeToRender) {
             const chartInfo = activeCharts[chartIndex];
             if (!chartInfo) return; 
-            const { originalCanvas, questionHeader, chartData, qType, likertScaleConfig } = chartInfo;
+            const { originalCanvas, questionHeader, chartData, qType, likertScaleConfig, customLabels } = chartInfo;
             
             if (!chartData) {
                 console.error("Chart data is missing for chartIndex:", chartIndex);
@@ -1511,17 +1554,17 @@
                 return;
             }
 
-            const orderedLabels = chartInfo.labelOrder || chartData.labels; 
-            const orderedDataValues = [];
+            const originalLabels = chartData.labels;
+            const displayLabels = originalLabels.map(label => (customLabels && customLabels[label]) ? customLabels[label] : label);
+            
             const orderedPercentages = [];
             const orderedCounts = [];
-
-            orderedLabels.forEach(label => {
-                const originalIndex = chartData.labels.indexOf(label);
-                if (originalIndex !== -1) {
-                    orderedDataValues.push(chartData.dataValues[originalIndex]);
-                    orderedPercentages.push(chartData.percentages[originalIndex]);
-                    orderedCounts.push(chartData.counts[originalIndex]);
+            
+            originalLabels.forEach(originalLabel => { 
+                const dataIndex = chartData.labels.indexOf(originalLabel);
+                if (dataIndex !== -1) {
+                    orderedPercentages.push(chartData.percentages[dataIndex]);
+                    orderedCounts.push(chartData.counts[dataIndex]);
                 }
             });
 
@@ -1531,13 +1574,14 @@
 
             if (qType === 'likert' && likertScaleConfig) {
                 activePaletteForCurrentChart = COLOR_PALETTES.likert[currentLikertPaletteKey];
-                orderedLabels.forEach((label, i) => { 
-                    if (label === OTHER_RESPONSE_LABEL) { finalChartBackgroundColor.push(OTHER_RESPONSE_COLOR); } 
+                displayLabels.forEach((label, i) => { 
+                    const originalLabelForColor = originalLabels[i]; 
+                    if (label === OTHER_RESPONSE_LABEL ) { finalChartBackgroundColor.push(OTHER_RESPONSE_COLOR); } 
                     else if (NO_RESPONSE_TERMS.includes(label)) { finalChartBackgroundColor.push(NO_RESPONSE_COLOR); } 
-                    else if (currentLikertPaletteKey === 'default' && likertScaleConfig.colors && likertScaleConfig.responses.includes(label)) {
-                        finalChartBackgroundColor.push(likertScaleConfig.colors[likertScaleConfig.responses.indexOf(label)]);
+                    else if (currentLikertPaletteKey === 'default' && likertScaleConfig.colors && likertScaleConfig.responses.includes(originalLabelForColor)) {
+                        finalChartBackgroundColor.push(likertScaleConfig.colors[likertScaleConfig.responses.indexOf(originalLabelForColor)]);
                     } else {
-                        const actualResponseLabels = orderedLabels.filter(l => l !== OTHER_RESPONSE_LABEL && !NO_RESPONSE_TERMS.includes(l));
+                        const actualResponseLabels = displayLabels.filter(l => l !== OTHER_RESPONSE_LABEL && !NO_RESPONSE_TERMS.includes(l));
                         const actualIndex = actualResponseLabels.indexOf(label);
                         if (actualIndex !== -1 && activePaletteForCurrentChart) {
                             finalChartBackgroundColor.push(activePaletteForCurrentChart[actualIndex % activePaletteForCurrentChart.length]);
@@ -1550,21 +1594,21 @@
                 });
             } else { 
                 activePaletteForCurrentChart = COLOR_PALETTES.general[currentGeneralPaletteKey];
-                orderedLabels.forEach((label, i) => { 
+                displayLabels.forEach((label, i) => { 
                     finalChartBackgroundColor.push(activePaletteForCurrentChart[i % activePaletteForCurrentChart.length]);
                 });
             }
 
             let datasets = [];
-            let chartLabelsForRender = orderedLabels; 
+            let chartLabelsForRender = displayLabels; 
             let chartTypeForConfig = 'bar';
             if (chartTypeToRender === 'pie' || chartTypeToRender === 'doughnut') { chartTypeForConfig = chartTypeToRender; }
             let isStacked = chartTypeToRender === 'stackedBar' || chartTypeToRender === 'stackedHorizontalBar';
             let currentChartIndexAxis = (chartTypeToRender === 'horizontalBar' || chartTypeToRender === 'stackedHorizontalBar') ? 'y' : 'x';
 
             if (isStacked) {
-                chartLabelsForRender = [questionHeader]; 
-                orderedLabels.forEach((label, i) => { 
+                chartLabelsForRender = [chartInfo.customTitle || questionHeader]; 
+                displayLabels.forEach((label, i) => { 
                     datasets.push({ 
                         label: label, 
                         data: [orderedPercentages[i]], 
@@ -1575,9 +1619,9 @@
                     }); 
                 });
             } else if (chartTypeToRender === 'bar' || chartTypeToRender === 'horizontalBar') {
-                 datasets.push({ label: `${questionHeader} 응답 분포 (%)`, data: orderedPercentages, backgroundColor: finalChartBackgroundColor, counts: orderedCounts });
+                 datasets.push({ label: `${chartInfo.customTitle || questionHeader} 응답 분포 (%)`, data: orderedPercentages, backgroundColor: finalChartBackgroundColor, counts: orderedCounts });
             } else { 
-                 datasets.push({ label: `${questionHeader} 응답 분포`, data: orderedCounts, backgroundColor: finalChartBackgroundColor, hoverOffset: 4, percentages: orderedPercentages, counts: orderedCounts });
+                 datasets.push({ label: `${chartInfo.customTitle || questionHeader} 응답 분포`, data: orderedCounts, backgroundColor: finalChartBackgroundColor, hoverOffset: 4, percentages: orderedPercentages, counts: orderedCounts });
             }
 
             const datalabelsConfig = {
@@ -1589,12 +1633,11 @@
                         countForLabel = context.dataset.counts[context.dataIndex];
                         const totalCount = context.dataset.counts.reduce((a, b) => a + b, 0);
                         displayValue = totalCount > 0 ? (countForLabel / totalCount) * 100 : 0;
-                         return displayValue > 0 ? displayValue.toFixed(1) + '%' : ''; // 0%는 표시 안 함
                     } else { 
                         displayValue = value; 
                         countForLabel = context.dataset.counts[context.dataIndex];
-                        return displayValue > 0 ? displayValue.toFixed(1) + '%' : ''; // 0%는 표시 안 함
                     }
+                     return displayValue > 0 ? displayValue.toFixed(1) + '%' : (displayValue === 0 ? '0.0%' : ''); // 0일때도 0.0% 표시
                 },
                 color: (context) => {
                     if (chartTypeToRender === 'bar' || chartTypeToRender === 'horizontalBar') { return '#000000'; }
@@ -1615,7 +1658,7 @@
                     responsive: true, maintainAspectRatio: false, indexAxis: currentChartIndexAxis, scales: {}, 
                     plugins: { 
                         legend: { 
-                            display: isStacked || chartTypeToRender === 'pie' || chartTypeToRender === 'doughnut' || chartTypeToRender === 'stackedHorizontalBar' || chartTypeToRender === 'stackedBar' || orderedLabels.length > 7, 
+                            display: isStacked || chartTypeToRender === 'pie' || chartTypeToRender === 'doughnut' || chartTypeToRender === 'stackedHorizontalBar' || chartTypeToRender === 'stackedBar' || chartLabelsForRender.length > 7, 
                             labels: {
                                 boxWidth: (chartTypeToRender === 'pie' || chartTypeToRender === 'doughnut' || chartTypeToRender === 'stackedHorizontalBar' || chartTypeToRender === 'stackedBar') ? 12 : 40, 
                                 padding: (chartTypeToRender === 'pie' || chartTypeToRender === 'doughnut' || chartTypeToRender === 'stackedHorizontalBar' || chartTypeToRender === 'stackedBar') ? 10 : 20,
@@ -1706,45 +1749,75 @@
         
         // 공통 접두사 찾기 함수 (행렬형 차트 레이블용)
         function findCommonPrefixForMatrixLabels(strings) {
-            if (!strings || strings.length < 2) return "";
+            if (!strings || strings.length === 0) return ""; 
+            if (strings.length === 1) return ""; 
+
             let prefix = strings[0];
             for (let i = 1; i < strings.length; i++) {
+                if (!strings[i]) return ""; 
                 while (strings[i].indexOf(prefix) !== 0) {
                     prefix = prefix.substring(0, prefix.length - 1);
                     if (prefix === "") return "";
                 }
             }
             
-            if (prefix.length < 3 ) { 
-                 return "";
+            const remainders = strings.map(s => s.substring(prefix.length).trimStart());
+            if (remainders.some(r => r.length < 2) && strings.length > 1) { 
+                 return ""; 
             }
-
-            const allRemaindersMeaningful = strings.every(s => s.substring(prefix.length).trim().length >= 3);
-            if (!allRemaindersMeaningful && strings.length > 1) { 
+            if (remainders.length > 1 && new Set(remainders).size === 1 && remainders[0] === "") { 
                 return ""; 
             }
             
-            const lastChar = prefix.charAt(prefix.length - 1);
-            if (![' ', ':', '-', '.', '?', '!', ')', ']'].includes(lastChar)) { 
-                const lastSpaceIndex = prefix.lastIndexOf(' ');
-                if (lastSpaceIndex > 0 && lastSpaceIndex > prefix.length / 3) { 
-                    prefix = prefix.substring(0, lastSpaceIndex + 1);
+            const delimiters = [" - ", ": ", ". ", ") ", "] ", "_", "질문", "문항"]; 
+            let bestDelimiterIndex = -1;
+            let bestDelimiter = "";
+
+            delimiters.forEach(d => {
+                let tempPrefix = prefix;
+                let lastIndexOfDelimiter = tempPrefix.lastIndexOf(d);
+                if (lastIndexOfDelimiter !== -1 && lastIndexOfDelimiter + d.length <= tempPrefix.length) {
+                     const potentialPrefixEnd = lastIndexOfDelimiter + d.length;
+                     if (potentialPrefixEnd > bestDelimiterIndex) {
+                        bestDelimiterIndex = potentialPrefixEnd;
+                        bestDelimiter = tempPrefix.substring(0, bestDelimiterIndex);
+                    }
+                }
+            });
+            
+            if (bestDelimiter) {
+                prefix = bestDelimiter;
+            } else {
+                const lastSpace = prefix.trimEnd().lastIndexOf(" ");
+                if (lastSpace > 0 && prefix.substring(0, lastSpace + 1).length >=3 ) {
+                    prefix = prefix.substring(0, lastSpace + 1);
+                } else if (prefix.length < 3 && !/Q\d*\W/.test(prefix) && !/문항\d*\W/.test(prefix) ) { 
+                    return "";
                 }
             }
             return prefix.trim();
         }
 
 
-        function generateCrossAnalysisChart(config, idSuffix, isReRender = false) { 
+        function generateCrossAnalysisChart(config, idSuffix, isReRender = false, chartIndexToUpdate = -1) { 
             const { likertQuestions, groupingQuestion, crossChartType } = config; 
             
             let vizWrapper;
-            if (isReRender) {
-                vizWrapper = document.getElementById(`matrix-chart-${idSuffix}`).closest('.viz-wrapper');
+            let currentChartArrayIndex = chartIndexToUpdate;
+
+            if (isReRender && chartIndexToUpdate !== -1) {
+                const existingCanvas = document.getElementById(`matrix-chart-${idSuffix}`);
+                 if (existingCanvas) {
+                    vizWrapper = existingCanvas.closest('.viz-wrapper');
+                } else { 
+                    console.error(`Cannot find vizWrapper for re-render: matrix-chart-${idSuffix}`);
+                    return;
+                }
             } else {
                 vizWrapper = document.createElement('div');
                 vizWrapper.className = 'viz-wrapper full-width-xl'; 
                 chartsArea.appendChild(vizWrapper);
+                currentChartArrayIndex = activeCharts.length; // For new chart
             }
 
             const originalTitleText = `${questionFullTexts[groupingQuestion] || groupingQuestion} 별 리커트 문항 ${crossChartType === 'averageScoreBar' ? '평균 비교' : (crossChartType === 'stackedPercentageBar' ? '응답 비율 비교' : '전체 평균 비교')}`;
@@ -1752,12 +1825,12 @@
             if (!titleElement) {
                 titleElement = document.createElement('h4');
                 titleElement.className = 'text-md font-semibold text-center mb-3 text-slate-700 break-words';
-                vizWrapper.insertBefore(titleElement, vizWrapper.firstChild); // Add title if not exists
+                vizWrapper.insertBefore(titleElement, vizWrapper.firstChild); 
             }
-            const currentChartIndex = activeCharts.findIndex(c => c.originalCanvas && c.originalCanvas.id === `matrix-chart-${idSuffix}`);
-            titleElement.textContent = (currentChartIndex !== -1 && activeCharts[currentChartIndex].customTitle) ? activeCharts[currentChartIndex].customTitle : originalTitleText; 
+            
+            titleElement.textContent = (isReRender && currentChartArrayIndex !== -1 && activeCharts[currentChartArrayIndex] && activeCharts[currentChartArrayIndex].customTitle) ? activeCharts[currentChartArrayIndex].customTitle : originalTitleText; 
             titleElement.contentEditable = true;
-            titleElement.dataset.chartIndex = currentChartIndex !== -1 ? currentChartIndex : activeCharts.length; // 재렌더링 시 기존 인덱스, 신규 시 새 인덱스
+            titleElement.dataset.chartIndex = currentChartArrayIndex; 
             
             titleElement.removeEventListener('blur', handleChartTitleBlur); 
             titleElement.removeEventListener('keydown', handleChartTitleKeydown);
@@ -1877,11 +1950,12 @@
                     groupingQuestion: groupingQuestion, 
                     likertQuestions: likertQuestions,
                     originalTitle: originalTitleText,
-                    customTitle: titleElement.textContent // 현재 표시된 (수정 가능성 있는) 제목
+                    customTitle: titleElement.textContent,
+                    customLabels: (isReRender && currentChartArrayIndex !== -1 && activeCharts[currentChartArrayIndex]) ? activeCharts[currentChartArrayIndex].customLabels : {}
                 };
 
-                if (isReRender && currentChartIndex !== -1) {
-                    activeCharts[currentChartIndex] = chartInfoObject;
+                if (isReRender && currentChartArrayIndex !== -1) {
+                    activeCharts[currentChartArrayIndex] = chartInfoObject;
                 } else {
                     activeCharts.push(chartInfoObject);
                 }
@@ -1906,17 +1980,17 @@
                 individualMatrixTypeSelect.addEventListener('change', (e) => {
                     const chartIndexToUpdate = activeCharts.findIndex(c => c.originalCanvas.id === canvas.id);
                     if (chartIndexToUpdate !== -1) {
-                         const newCrossChartType = e.target.value;
-                         activeCharts[chartIndexToUpdate].crossChartType = newCrossChartType;
+                         const newCrossType = e.target.value;
+                         activeCharts[chartIndexToUpdate].crossChartType = newCrossType;
                          if (activeCharts[chartIndexToUpdate].instance) {
                              activeCharts[chartIndexToUpdate].instance.destroy();
                          }
                          generateCrossAnalysisChart({
                              likertQuestions: activeCharts[chartIndexToUpdate].likertQuestions,
                              groupingQuestion: activeCharts[chartIndexToUpdate].groupingQuestion,
-                             crossChartType: newCrossChartType,
+                             crossChartType: newCrossType,
                              idSuffix: idSuffix
-                         }, true); 
+                         }, true, chartIndexToUpdate); 
                     }
                 });
                 chartActionsContainer.appendChild(individualMatrixTypeSelect);
@@ -1937,6 +2011,14 @@
                     }
                 };
                 chartActionsContainer.appendChild(downloadPngBtn);
+
+                 // Add "레이블 편집" button for matrix charts
+                const editMatrixLabelsButton = document.createElement('button');
+                editMatrixLabelsButton.textContent = '레이블 편집';
+                editMatrixLabelsButton.className = 'download-button download-csv-button ml-2';
+                editMatrixLabelsButton.onclick = () => openLabelEditModal(currentChartArrayIndex); // Use currentChartArrayIndex
+                chartActionsContainer.appendChild(editMatrixLabelsButton);
+
 
             } catch (error) {
                 console.error("Error creating matrix cross-analysis chart:", error, config, chartConfig);
@@ -2160,9 +2242,156 @@
             setDiv.classList.toggle('hidden'); icon.innerHTML = setDiv.classList.contains('hidden') ? '&#9654;' : '&#9660;'; icon.classList.toggle('open', !setDiv.classList.contains('hidden'));
         }
         
+        // --- Label Edit Modal Functions ---
+        let currentEditingChartIndex = -1;
+        let tempCustomLabels = {};
+
+        function openLabelEditModal(chartIndex) {
+            currentEditingChartIndex = chartIndex;
+            const chartInfo = activeCharts[chartIndex];
+            if (!chartInfo || !chartInfo.chartData || !chartInfo.chartData.labels) {
+                console.error("차트 정보 또는 레이블 데이터가 없습니다.", chartInfo);
+                return;
+            }
+
+            tempCustomLabels = JSON.parse(JSON.stringify(chartInfo.customLabels || {})); // Deep copy
+
+            const modalOverlay = document.createElement('div');
+            modalOverlay.className = 'modal-overlay';
+            modalOverlay.id = 'labelEditModalOverlay';
+            
+            const modal = document.createElement('div');
+            modal.className = 'label-edit-modal';
+            modal.id = 'labelEditModal';
+
+            const title = document.createElement('h3');
+            title.className = 'text-lg font-medium leading-6 text-gray-900 mb-4';
+            title.textContent = `"${chartInfo.customTitle || chartInfo.originalTitle}" 레이블 편집`;
+            modal.appendChild(title);
+
+            const list = document.createElement('ul');
+            
+            // For basic charts, chartData.labels are the ones to edit
+            // For matrix charts, matrixData.labels (X-axis) or dataset labels (legend)
+            let labelsToEdit = [];
+            if (chartInfo.type === 'basic') {
+                labelsToEdit = chartInfo.chartData.labels;
+            } else if (chartInfo.type === 'matrix' && chartInfo.chartData && chartInfo.chartData.labels) { // X-axis labels
+                labelsToEdit = chartInfo.chartData.labels; 
+                // If you also want to edit legend labels for matrix charts (groupingCategory)
+                // you'd need to iterate through chartInfo.chartData.datasets.map(d => d.label)
+            }
+
+
+            labelsToEdit.forEach(originalLabel => {
+                const listItem = document.createElement('li');
+                
+                const originalLabelSpan = document.createElement('span');
+                originalLabelSpan.className = 'original-label-text';
+                originalLabelSpan.textContent = originalLabel;
+                originalLabelSpan.title = originalLabel; // Show full text on hover
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'custom-label-input';
+                input.value = tempCustomLabels[originalLabel] || originalLabel;
+                input.dataset.originalLabel = originalLabel;
+
+                if (originalLabel === OTHER_RESPONSE_LABEL || NO_RESPONSE_TERMS.includes(originalLabel)) {
+                    input.disabled = true;
+                }
+
+                listItem.appendChild(originalLabelSpan);
+                listItem.appendChild(input);
+                list.appendChild(listItem);
+            });
+
+            modal.appendChild(list);
+
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'modal-actions';
+
+            const cancelButton = document.createElement('button');
+            cancelButton.textContent = '취소';
+            cancelButton.className = 'cancel-btn';
+            cancelButton.onclick = () => {
+                modalOverlay.remove();
+                modal.remove();
+            };
+
+            const applyButton = document.createElement('button');
+            applyButton.textContent = '적용';
+            applyButton.className = 'apply-btn';
+            applyButton.onclick = () => applyLabelEdit(chartIndex);
+            
+            actionsDiv.appendChild(cancelButton);
+            actionsDiv.appendChild(applyButton);
+            modal.appendChild(actionsDiv);
+
+            document.body.appendChild(modalOverlay);
+            document.body.appendChild(modal);
+
+            modalOverlay.addEventListener('click', () => { // Close on overlay click
+                modalOverlay.remove();
+                modal.remove();
+            });
+        }
+
+        function applyLabelEdit(chartIndex) {
+            const chartInfo = activeCharts[chartIndex];
+            if (!chartInfo) return;
+
+            const modal = document.getElementById('labelEditModal');
+            if (!modal) return;
+
+            const inputs = modal.querySelectorAll('.custom-label-input');
+            const newCustomLabels = {};
+            inputs.forEach(input => {
+                const originalLabel = input.dataset.originalLabel;
+                if (input.value.trim() !== originalLabel && input.value.trim() !== "") {
+                    newCustomLabels[originalLabel] = input.value.trim();
+                } else {
+                    // If input is empty or same as original, remove from customLabels
+                    delete newCustomLabels[originalLabel]; 
+                }
+            });
+            
+            chartInfo.customLabels = newCustomLabels;
+
+            if (chartInfo.instance) {
+                chartInfo.instance.destroy();
+            }
+
+            if (chartInfo.type === 'basic') {
+                renderIndividualChart(chartIndex, chartInfo.currentChartType);
+            } else if (chartInfo.type === 'matrix') {
+                 generateCrossAnalysisChart({
+                    likertQuestions: chartInfo.likertQuestions,
+                    groupingQuestion: chartInfo.groupingQuestion,
+                    crossChartType: chartInfo.crossChartType,
+                    idSuffix: chartInfo.originalCanvas.id.split('-').pop()
+                }, chartInfo.originalCanvas.id.split('-').pop(), true, chartIndex);
+            }
+
+
+            const modalOverlay = document.getElementById('labelEditModalOverlay');
+            if (modalOverlay) modalOverlay.remove();
+            modal.remove();
+        }
+
+
         // Initialize color palette selector on DOM load
         document.addEventListener('DOMContentLoaded', () => {
             initializeColorPalettes();
+             // 빌드 정보 표시
+            const buildInfoDiv = document.getElementById('buildInfo');
+            if (buildInfoDiv) {
+                const today = new Date();
+                const year = today.getFullYear();
+                const month = String(today.getMonth() + 1).padStart(2, '0');
+                const day = String(today.getDate()).padStart(2, '0');
+                buildInfoDiv.textContent = `빌드 날짜: ${year}-${month}-${day} / 버전: 2.1`;
+            }
         });
     </script>
 </body>
